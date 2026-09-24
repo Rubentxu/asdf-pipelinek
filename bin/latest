@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
-# asdf-pipelinek bin/latest: latest stable release tag (prereleases excluded).
+# asdf-pipelinek bin/latest: latest STABLE version (prereleases like *-rc* excluded).
 set -euo pipefail
 
-GH_REPO="Rubentxu/pipeline-kotlin"
-
-latest="$(curl -fsSL "https://api.github.com/repos/${GH_REPO}/releases/latest" \
-  | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"v\{0,1\}\([^"]*\)"$/\1/')"
-
-if [ -z "$latest" ]; then
-  echo "ERROR: could not determine latest release of ${GH_REPO}." >&2
-  exit 1
-fi
-echo "$latest"
+dir="$(cd "$(dirname "$0")" && pwd)"
+all="$("$dir/list-all")"
+stable="$(printf '%s\n' $all | grep -v -- '-rc' | sort -V | tail -1)"
+echo "$stable"

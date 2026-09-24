@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# asdf-pipelinek bin/list-all: all installable versions, oldest-first, space-separated.
+# asdf 0.19 requires this callback for `asdf latest`.
+set -euo pipefail
+
+GH_REPO="Rubentxu/pipeline-kotlin"
+
+tags="$(curl -fsSL --retry 3 "https://api.github.com/repos/${GH_REPO}/releases?per_page=100" \
+  | grep -o '"tag_name": *"[^"]*"' \
+  | sed 's/.*"\([^"]*\)"$/\1/' \
+  | sed 's/^v//' \
+  | sort -u)"
+
+if [ -z "$tags" ]; then
+  echo "ERROR: could not list releases of ${GH_REPO}." >&2
+  exit 1
+fi
+
+echo "$tags" | tr '\n' ' '; echo

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Requires java on PATH at shim-exec time; see README (JDK 21+).
 # asdf-pipelinek bin/install: extract verified canonical ZIP. No compilation, no JDK install.
 set -euo pipefail
 
