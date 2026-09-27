@@ -1,34 +1,84 @@
 #!/usr/bin/env bash
 # asdf-pipelinek bin/list-all: all installable versions, oldest-first, space-separated.
 # asdf 0.19 requires this callback for `asdf latest`.
+#
+# Authentication: tries GITHUB_TOKEN env, then gh CLI, then gh config file.
+# If all fail, uses unauthenticated API (rate limit: 60 req/hour).
 set -euo pipefail
 
 GH_REPO="Rubentxu/pipeline-kotlin"
+GH_API="https://api.github.com/repos/${GH_REPO}/releases"
 
-# Try to get token from gh config or environment
-GH_TOKEN=""
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-    GH_TOKEN="$GITHUB_TOKEN"
-elif [ -f "$HOME/.config/gh/hosts.yml" ]; then
-    GH_TOKEN=$(grep "oauth_token:" "$HOME/.config/gh/hosts.yml" | head -1 | awk '{print $2}')
-fi
+# Try to get GitHub token from multiple sources
+get_gh_token() {
+    # 1. Environment variable
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        echo "$GITHUB_TOKEN"
+        return 0
+    fi
+    
+    # 2. gh CLI (if available and authenticated)
+    if command -v gh &>/dev/null; then
+        local token
+        token=$(gh auth token 2>/dev/null) && echo "$token" && return 0
+    fi
+    
+    # 3. Read from gh config file
+    local gh_config="${HOME}/.config/gh/hosts.yml"
+    if [ -f "$gh_config" ]; then
+        local token
+        token=$(grep "oauth_token:" "$gh_config" 2>/dev/null | head -1 | awk '{print $2}')
+        [ -n "$token" ] && echo "$token" && return 0
+    fi
+    
+    return 1
+}
 
-# Build curl command
-CURL_CMD="curl -fsSL --retry 3"
-if [ -n "$GH_TOKEN" ]; then
-    CURL_CMD="${CURL_CMD} -H 'Authorization: token ${GH_TOKEN}'"
-fi
+# Fetch versions with retry logic
+fetch_versions() {
+    local curl_cmd="curl -fsSL --retry 3 --fail"
+    
+    # Try with token first
+    if GH_TOKEN=$(get_gh_token); then
+        curl_cmd="$curl_cmd -H 'Authorization: token ${GH_TOKEN}'"
+    fi
+    
+    # shellcheck disable=SC2086
+    local response
+    response=$(eval $CURL_CMD "$GH_API?per_page=100" 2>&1) && {
+        echo "$response" | grep -o '"tag_name": *"[^"]*"' \
+            | sed 's/.*"\([^"]*\)"$/\1/' \
+            | sed 's/^v//' \
+            | sort -u
+        return 0
+    }
+    
+    # If authenticated failed (rate limit), try without token
+    if [ -n "${GH_TOKEN:-}" ]; then
+        curl_cmd="curl -fsSL --retry 3 --fail"
+        response=$(eval $CURL_CMD "$GH_API?per_page=100" 2>&1) && {
+            echo "$response" | grep -o '"tag_name": *"[^"]*"' \
+                | sed 's/.*"\([^"]*\)"$/\1/' \
+                | sed 's/^v//' \
+                | sort -u
+            return 0
+        }
+    fi
+    
+    return 1
+}
 
-# shellcheck disable=SC2086
-tags=$(eval $CURL_CMD "https://api.github.com/repos/${GH_REPO}/releases?per_page=100" \
-  | grep -o '"tag_name": *"[^"]*"' \
-  | sed 's/.*"\([^"]*\)"$/\1/' \
-  | sed 's/^v//' \
-  | sort -u)
+# Main
+TAGS=$(fetch_versions) || {
+    echo "ERROR: could not list releases of ${GH_REPO}." >&2
+    echo "" >&2
+    echo "Troubleshooting:" >&2
+    echo "  1. Check your internet connection" >&2
+    echo "  2. GitHub API rate limit may be exceeded" >&2
+    echo "  3. To increase limits, authenticate with GitHub:" >&2
+    echo "     - Run: gh auth login" >&2
+    echo "     - Or set GITHUB_TOKEN environment variable" >&2
+    exit 1
+}
 
-if [ -z "$tags" ]; then
-  echo "ERROR: could not list releases of ${GH_REPO}." >&2
-  exit 1
-fi
-
-echo "$tags" | tr '\n' ' '; echo
+echo "$TAGS" | tr '\n' ' '; echo

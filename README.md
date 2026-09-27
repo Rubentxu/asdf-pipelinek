@@ -11,8 +11,8 @@ mismatch. The plugin **never compiles PipelineK** and **never installs Java**.
 
 ```bash
 asdf plugin add pipelinek https://github.com/Rubentxu/asdf-pipelinek.git
-asdf install pipelinek 0.39.1-rc1      # or the latest stable, e.g. 0.39.0
-asdf set --home pipelinek 0.39.0       # or per-project with asdf local
+asdf install pipelinek 0.40.0        # or the latest stable
+asdf set --home pipelinek 0.40.0     # or per-project with asdf local
 ```
 
 ## Requirements
@@ -22,10 +22,28 @@ asdf set --home pipelinek 0.39.0       # or per-project with asdf local
   error, see the hint printed by `bin/install`.
 - `curl`, `unzip`, `sha256sum` (coreutils).
 
+## GitHub Authentication (Optional)
+
+The plugin uses the GitHub API to list available versions. To avoid rate limits:
+
+1. **Using gh CLI** (recommended):
+   ```bash
+   gh auth login
+   ```
+
+2. **Using environment variable**:
+   ```bash
+   export GITHUB_TOKEN="your_token_here"
+   ```
+
+3. **Without authentication**: Works but has a rate limit of 60 requests/hour.
+
+The plugin automatically detects `gh` authentication or reads from `~/.config/gh/hosts.yml`.
+
 ## Version policy
 
 - `asdf install pipelinek <version>` accepts any published release tag,
-  including prereleases like `0.39.1-rc1` (always pinned explicitly).
+  including prereleases like `0.40.0-rc1` (always pinned explicitly).
 - `asdf latest pipelinek` returns **stable releases only**; prereleases
   (`-rc*`, etc.) are never the default.
 
