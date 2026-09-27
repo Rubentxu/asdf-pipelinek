@@ -5,11 +5,26 @@ set -euo pipefail
 
 GH_REPO="Rubentxu/pipeline-kotlin"
 
-tags="$(curl -fsSL --retry 3 "https://api.github.com/repos/${GH_REPO}/releases?per_page=100" \
+# Try to get token from gh config or environment
+GH_TOKEN=""
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    GH_TOKEN="$GITHUB_TOKEN"
+elif [ -f "$HOME/.config/gh/hosts.yml" ]; then
+    GH_TOKEN=$(grep "oauth_token:" "$HOME/.config/gh/hosts.yml" | head -1 | awk '{print $2}')
+fi
+
+# Build curl command
+CURL_CMD="curl -fsSL --retry 3"
+if [ -n "$GH_TOKEN" ]; then
+    CURL_CMD="${CURL_CMD} -H 'Authorization: token ${GH_TOKEN}'"
+fi
+
+# shellcheck disable=SC2086
+tags=$(eval $CURL_CMD "https://api.github.com/repos/${GH_REPO}/releases?per_page=100" \
   | grep -o '"tag_name": *"[^"]*"' \
   | sed 's/.*"\([^"]*\)"$/\1/' \
   | sed 's/^v//' \
-  | sort -u)"
+  | sort -u)
 
 if [ -z "$tags" ]; then
   echo "ERROR: could not list releases of ${GH_REPO}." >&2
