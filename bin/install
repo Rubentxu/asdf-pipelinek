@@ -22,11 +22,20 @@ mkdir -p "$install_dir"
 unzip -q "${download_dir}/${zip_name}" -d "$install_dir"
 
 # Flatten: expose <install>/bin/pipelinek (asdf list-bin-paths 'bin' expects bin/ at install root).
-if [ -d "${install_dir}/pipelinek-${VERSION}" ]; then
-  mv "${install_dir}/pipelinek-${VERSION}/bin" "${install_dir}/bin"
-  mv "${install_dir}/pipelinek-${VERSION}/lib" "${install_dir}/lib"
-  rmdir "${install_dir}/pipelinek-${VERSION}"
+# The ZIP may contain 'pipelinek-X.Y.Z' or 'pipelinek-X.Y.Z-rcN'; find the actual directory.
+pipelinek_dir="${install_dir}/pipelinek-${VERSION}"
+if [ ! -d "$pipelinek_dir" ]; then
+  # Try with -rcN suffix (e.g. 0.40.0-rc8 when installing 0.40.0)
+  pipelinek_dir=$(find "$install_dir" -maxdepth 1 -type d -name "pipelinek-${VERSION}*" | head -1)
+  if [ -z "$pipelinek_dir" ] || [ ! -d "$pipelinek_dir" ]; then
+    echo "ERROR: could not find pipelinek-${VERSION}* directory in ZIP. Fail-closed abort." >&2
+    exit 1
+  fi
 fi
+
+mv "${pipelinek_dir}/bin" "${install_dir}/bin"
+mv "${pipelinek_dir}/lib" "${install_dir}/lib"
+rmdir "$pipelinek_dir"
 
 if [ ! -x "${install_dir}/bin/pipelinek" ]; then
   echo "ERROR: expected launcher bin/pipelinek not found after extraction. Fail-closed abort." >&2

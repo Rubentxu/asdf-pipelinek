@@ -11,7 +11,7 @@ download_dir="${ASDF_DOWNLOAD_PATH:-$(mktemp -d)}"
 mkdir -p "$download_dir"
 
 zip_name="pipelinek-${VERSION}.zip"
-sums_name="pipelinek-${VERSION}.SHA256SUMS"
+sums_name="SHA256SUMS"
 
 echo "Downloading ${BASE_URL}/${zip_name}"
 if ! curl -fsSL --retry 3 -o "${download_dir}/${zip_name}" "${BASE_URL}/${zip_name}"; then
