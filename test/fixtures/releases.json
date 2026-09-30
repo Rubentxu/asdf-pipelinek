@@ -1,0 +1,134 @@
+[
+  {
+    "tag_name": "v0.43.0",
+    "name": "PipelineK v0.43.0",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tag_name": "v0.43.0-rc1",
+    "name": "v0.43.0-rc1 \u2014 Pure Builder Consumption Gate",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.42.0-rc1",
+    "name": "v0.42.0-rc1 \u2014 Semantic Honesty Gate",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.41.0-rc1",
+    "name": "PipelineK v0.41.0-rc1",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.40.0",
+    "name": "PipelineK v0.40.0",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tag_name": "v0.40.0-rc8",
+    "name": "v0.40.0-rc8",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.40.0-rc7",
+    "name": "PipelineK v0.40.0-rc7",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.40.0-rc6",
+    "name": "v0.40.0-rc6",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.40.0-rc5",
+    "name": "pipelinek 0.40.0-rc5",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.40.0-rc4",
+    "name": "PipelineK 0.40.0-rc4",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.40.0-rc3",
+    "name": "PipelineK v0.40.0-rc3",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.40.0-rc2",
+    "name": "PipelineK v0.40.0-rc2 release candidate",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.40.0-rc1",
+    "name": "pipelinek 0.40.0-rc1 \u2014 ExecutionContext & ScmGitCheckout CERTIFIED (release candidate)",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.39.1-rc4",
+    "name": "v0.39.1-rc4 \u2014 release candidate (shutdown race fix)",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.39.1-rc3",
+    "name": "v0.39.1-rc3",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.39.1-rc2",
+    "name": "v0.39.1-rc2 \u2014 WU-RP-053 consolidated workspace/cwd fixes (release candidate)",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.39.1-rc1",
+    "name": "v0.39.1-rc1 \u2014 WU-RP-053 workspace fix (release candidate)",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.39.0",
+    "name": "pipelinek 0.39.0 \u2014 Local Production Ready (LPR-GATE-1)",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tag_name": "v0.35.0",
+    "name": "v0.35.0 \u2014 LB-02: core.sh registry migration + certification",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tag_name": "v0.34.0",
+    "name": "LFC-2 v0.34.0 \u2014 CDE.3 closed + core.echo registry migration",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tag_name": "v0.2.0",
+    "name": "\ud83d\ude80 Release v0.2.0: GraalVM Native Image Support",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "v0.1.0",
+    "name": "v0.1.0",
+    "draft": false,
+    "prerelease": false
+  }
+]
