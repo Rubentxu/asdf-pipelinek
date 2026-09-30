@@ -14,6 +14,60 @@ pk_sums_asset() { printf '%s\n' "SHA256SUMS"; }
 pk_zip_asset() { printf 'pipelinek-%s.zip\n' "$1"; }
 pk_release_url() { printf '%s/v%s/%s\n' "$PK_RELEASE_BASE" "$1" "$2"; }
 
+# GitHub token resolution, shared by every callback that talks to GitHub.
+# Precedence: GITHUB_TOKEN, GITHUB_API_TOKEN, gh CLI, gh config file.
+# Prints the token on stdout and returns 0; returns 1 with no output when no
+# source yields one, so callers can fall back to anonymous access.
+pk_github_token() {
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    printf '%s\n' "$GITHUB_TOKEN"
+    return 0
+  fi
+  if [ -n "${GITHUB_API_TOKEN:-}" ]; then
+    printf '%s\n' "$GITHUB_API_TOKEN"
+    return 0
+  fi
+  if command -v gh >/dev/null 2>&1; then
+    local t
+    if t="$(gh auth token 2>/dev/null)" && [ -n "$t" ]; then
+      printf '%s\n' "$t"
+      return 0
+    fi
+  fi
+  local cfg="${HOME:-}/.config/gh/hosts.yml"
+  if [ -f "$cfg" ]; then
+    local t
+    t="$(grep 'oauth_token:' "$cfg" 2>/dev/null | head -1 | awk '{print $2}')"
+    if [ -n "$t" ]; then
+      printf '%s\n' "$t"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# Fetch a URL, authenticating when a token is available. GitHub allows only 60
+# anonymous requests per hour, which a CI matrix exhausts quickly.
+# $1 url, $2 destination.
+pk_fetch() {
+  local auth=()
+  local token
+  if token="$(pk_github_token)"; then
+    auth=(-H "Authorization: token ${token}")
+  fi
+  curl -fsSL --retry 3 "${auth[@]}" -o "$2" "$1"
+}
+
+# Fetch a URL to stdout, authenticating when possible. $1 url.
+pk_fetch_stdout() {
+  local auth=()
+  local token
+  if token="$(pk_github_token)"; then
+    auth=(-H "Authorization: token ${token}")
+  fi
+  curl -fsSL --retry 3 "${auth[@]}" "$1"
+}
+
 # Prerelease detection, single source of truth. Upstream uses -rcN today; other
 # SemVer prerelease shapes (-alpha, -beta, -M1) and '+' build metadata are also
 # treated as unstable so the stable filter never silently leaks one.
