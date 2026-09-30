@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# asdf-pipelinek bin/latest-stable: latest STABLE version, prereleases excluded.
+#
+# This is the callback name asdf 0.19 invokes ("${plugin_path}/bin/latest-stable"
+# with an optional filter query). A bin/latest is never called by asdf.
+set -euo pipefail
+
+dir="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=../lib/common.bash
+source "${dir}/lib/common.bash"
+
+query="${1:-}"
+
+versions="$("${dir}/bin/list-all")"
+if [ -z "$versions" ]; then
+  echo "ERROR: could not list releases of ${PK_GH_REPO}." >&2
+  exit 1
+fi
+
+# Filter the query first, then drop prereleases, then take the newest.
+stable="$(printf '%s' "$versions" | pk_filter_prefix "$query" | pk_latest_stable || true)"
+
+if [ -z "$stable" ]; then
+  if [ -n "$query" ]; then
+    echo "ERROR: no stable version matches '${query}' in ${PK_GH_REPO}." >&2
+  else
+    echo "ERROR: no stable release found in ${PK_GH_REPO}." >&2
+  fi
+  exit 1
+fi
+
+echo "$stable"

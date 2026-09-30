@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-# asdf-pipelinek bin/latest: latest STABLE version (prereleases like *-rc* excluded).
-set -euo pipefail
-
-dir="$(cd "$(dirname "$0")" && pwd)"
-all="$("$dir/list-all")"
-stable="$(printf '%s\n' $all | grep -v -- '-rc' | sort -V | tail -1)"
-echo "$stable"
