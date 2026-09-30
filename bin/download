@@ -30,15 +30,17 @@ fetch() {
 
 echo "Downloading ${zip_url}"
 if ! fetch "$zip_url" "${download_dir}/${zip_name}"; then
-  echo "ERROR: could not download ${zip_name}." >&2
-  echo "Check your network/proxy (HTTPS_PROXY) and that version ${VERSION} exists:" >&2
+  # Distinguish "no such version" from "GitHub refused us", which both used to
+  # surface as the same opaque "could not download" message.
+  pk_explain_fetch_failure "$zip_name" "$VERSION"
   echo "  ${tag_url}" >&2
   exit 1
 fi
 
 echo "Downloading ${sums_url}"
 if ! fetch "$sums_url" "${download_dir}/${sums_name}"; then
-  echo "ERROR: could not download ${sums_name} for ${VERSION}. Fail-closed abort." >&2
+  pk_explain_fetch_failure "$sums_name" "$VERSION"
+  echo "This release is unusable without its digest manifest. Fail-closed abort." >&2
   exit 1
 fi
 

@@ -33,7 +33,13 @@ setup() {
     run bin/download
     
     [ "$status" -ne 0 ]
-    [[ "$output" == *"ERROR: could not download pipelinek-99.99.99.zip"* ]]
+    # A 404 must be reported as a missing version, not as a generic download
+    # failure: the two used to be indistinguishable (curl -f discarded the
+    # status), so a typo and a rate-limited request looked identical.
+    [[ "$output" == *"does not exist"* ]]
+    [[ "$output" == *"99.99.99"* ]]
+    # The old opaque wording must not creep back in.
+    [[ "$output" != *"could not download pipelinek-99.99.99.zip"* ]]
 }
 
 @test "fails closed if SHA256SUMS missing in release" {

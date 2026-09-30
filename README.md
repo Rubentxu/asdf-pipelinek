@@ -42,6 +42,20 @@ The plugin resolves a token from `GITHUB_TOKEN`, `GITHUB_API_TOKEN`, the `gh`
 CLI, or `~/.config/gh/hosts.yml`, in that order. A failed authenticated request
 is retried anonymously, so a stale token cannot make the plugin unusable.
 
+### Reading install errors
+
+`bin/download` reports the HTTP status it got, so a failure says which problem
+you actually have instead of a generic "could not download":
+
+| Message | Meaning | Fix |
+|---|---|---|
+| `... does not exist: version X was not found` | No such release (HTTP 404) | `asdf list all pipelinek` to see real versions |
+| `GitHub refused the request (HTTP 403)` | Anonymous rate limit (60/hour) or rejected token | `gh auth login`, or `export GITHUB_TOKEN=...` |
+| `rate limit exceeded (HTTP 429)` | Throttled | Wait, or authenticate |
+| `could not reach GitHub` | DNS/proxy/TLS failure, no response | Check your connection and `HTTPS_PROXY` |
+
+Every one of these still aborts without installing anything.
+
 
 ## Version policy
 

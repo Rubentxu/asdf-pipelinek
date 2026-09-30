@@ -49,13 +49,66 @@ pk_github_token() {
 # Fetch a URL, authenticating when a token is available. GitHub allows only 60
 # anonymous requests per hour, which a CI matrix exhausts quickly.
 # $1 url, $2 destination.
+#
+# curl -f makes a non-2xx response fail WITHOUT preserving the status code, so
+# before this helper recorded it a 404 (no such version) and a 403 (rate limit or
+# bad token) were indistinguishable to callers: both surfaced as a bare
+# "could not download". PK_LAST_STATUS now carries the status so callers can say
+# which one actually happened. curl -f still governs success, so a non-2xx
+# response is never written to the destination and always returns non-zero; only
+# the diagnosis improves, never the fail-closed behaviour.
+#
+# Must be called in the current shell, not a command substitution, for the
+# caller to read PK_LAST_STATUS back.
 pk_fetch() {
   local auth=()
   local token
   if token="$(pk_github_token)"; then
     auth=(-H "Authorization: token ${token}")
   fi
-  curl -fsSL --retry 3 "${auth[@]}" -o "$2" "$1"
+  # -w writes to stdout; -o sends the body to the file, so stdout carries only
+  # the status line. http_code is 000 when the request never reached the server
+  # (DNS, proxy, TLS, timeout), which is the network-failure case itself.
+  local status
+  status="$(curl -fsSL --retry 3 -w '%{http_code}' "${auth[@]}" -o "$2" "$1" 2>/dev/null)" || true
+  PK_LAST_STATUS="$status"
+  [ -n "$PK_LAST_STATUS" ] || return 1
+  case "$PK_LAST_STATUS" in
+    2*) return 0 ;;
+    # curl -f already refused to write the body on a non-2xx response.
+    *) return 1 ;;
+  esac
+}
+
+# Turn a failed pk_fetch into a message a user can act on.
+# $1 what failed (e.g. "pipelinek-0.43.0.zip"), $2 version.
+pk_explain_fetch_failure() {
+  local what="$1" version="$2" status="${PK_LAST_STATUS:-000}"
+  case "$status" in
+    404)
+      echo "ERROR: ${what} does not exist: version ${version} was not found in the" >&2
+      echo "${PK_GH_REPO} releases." >&2
+      echo "Run 'asdf list all pipelinek' to see the available versions." >&2
+      ;;
+    403)
+      echo "ERROR: GitHub refused the request for ${what} (HTTP 403)." >&2
+      echo "This is usually the anonymous rate limit (60 requests/hour), not a" >&2
+      echo "missing version. Authenticate to raise it:" >&2
+      echo "  gh auth login" >&2
+      echo "  # or: export GITHUB_TOKEN=..." >&2
+      ;;
+    429)
+      echo "ERROR: GitHub rate limit exceeded for ${what} (HTTP 429)." >&2
+      echo "Wait for the limit to reset, or authenticate with GITHUB_TOKEN." >&2
+      ;;
+    000)
+      echo "ERROR: could not reach GitHub to download ${what}." >&2
+      echo "Check your connection and proxy settings (HTTPS_PROXY), then retry." >&2
+      ;;
+    *)
+      echo "ERROR: could not download ${what} (HTTP ${status})." >&2
+      ;;
+  esac
 }
 
 # Fetch a URL to stdout, authenticating when possible. $1 url.

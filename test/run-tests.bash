@@ -95,20 +95,36 @@ make_curl_stub() {
   cat > "${dir}/curl" <<STUB
 #!/usr/bin/env bash
 # Test double for curl. Serves recorded fixtures by URL basename; no network.
-# Honours the real flags the plugin uses: -fsSL, --retry N, -o FILE, -H header.
+# Honours the real flags the plugin uses: -fsSL, --retry N, -o FILE, -H header,
+# and -w FORMAT. -w matters: bin/download reads the HTTP status to tell a missing
+# version (404) apart from a refused request (403), so a stub that ignored -w
+# would feed the plugin a status string real curl never sends.
 out=""
 url=""
 prev=""
+wfmt=""
 for a in "\$@"; do
   case "\$prev" in
     -o) out="\$a"; prev=""; continue ;;
+    -w) wfmt="\$a"; prev=""; continue ;;
   esac
   case "\$a" in
     -o) prev="-o"; continue ;;
+    -w) prev="-w"; continue ;;
     http*) url="\$a" ;;
   esac
   prev="\$a"
 done
+
+# Emit the -w format the way real curl does: %-expansions become the status,
+# anything else passes through.
+emit_status() {
+  [ -z "\$wfmt" ] && return 0
+  case "\$wfmt" in
+    *'%{http_code}'*) printf '%s' "\${wfmt//'%{http_code}'/\$1}" ;;
+    *) printf '%s' "\$wfmt" ;;
+  esac
+}
 
 # Drop the query string, then map a bare path to its recorded file.
 path="\${url%%\?*}"
@@ -121,12 +137,14 @@ for base in "\${STUB_FIXTURES:-}" "\$FIXTURES"; do
   for cand in "\$name" "\$name.json" "\$name.txt"; do
     if [ -f "\$base/\$cand" ]; then
       if [ -n "\$out" ]; then cat "\$base/\$cand" > "\$out"; else cat "\$base/\$cand"; fi
+      emit_status 200
       exit 0
     fi
   done
 done
 
 echo "curl(stub): no fixture for \$url" >&2
+emit_status "\${STUB_STATUS:-404}"
 exit 22
 STUB
   chmod +x "${dir}/curl"
@@ -255,6 +273,53 @@ printf '%s  pipelinek-0.43.0.zip\n' "$real_digest" > "${SUMS}/SHA256SUMS.good"
 out="$(PATH="${STUB_BIN}:$PATH" ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=0.43.0 \
   ASDF_DOWNLOAD_PATH="$DL_BAD" "${REPO_ROOT}/bin/download" 2>&1)"
 assert_status "sha256sum binary-mode manifest is tolerated" "0" "$?"
+
+########################################################################
+section "download distinguishes WHY a fetch failed"
+
+# The point of capturing the HTTP status: a 404 (no such version) and a 403
+# (rate limit / refused) used to produce the identical opaque message, so a user
+# could not tell a typo from a throttled request. These force each status
+# through the stub and assert the two messages genuinely differ.
+
+DL_404="${WORK}/dl404"
+mkdir -p "$DL_404"
+out_404="$(PATH="${STUB_BIN}:$PATH" STUB_FIXTURES="${WORK}/empty" STUB_STATUS=404 \
+  ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=9.99.99 \
+  ASDF_DOWNLOAD_PATH="$DL_404" "${REPO_ROOT}/bin/download" 2>&1)"
+assert_status "404 fails closed" "1" "$?"
+assert_contains "404 says the version does not exist" "does not exist" "$out_404"
+assert_contains "404 points at list all" "list all" "$out_404"
+
+DL_403="${WORK}/dl403"
+mkdir -p "$DL_403"
+out_403="$(PATH="${STUB_BIN}:$PATH" STUB_FIXTURES="${WORK}/empty" STUB_STATUS=403 \
+  ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=0.43.0 \
+  ASDF_DOWNLOAD_PATH="$DL_403" "${REPO_ROOT}/bin/download" 2>&1)"
+assert_status "403 fails closed" "1" "$?"
+assert_contains "403 names the HTTP status" "403" "$out_403"
+assert_contains "403 suggests authenticating" "GITHUB_TOKEN" "$out_403"
+# The decisive assertion: a 404 must NOT read like a 403 and vice versa.
+assert_not_contains "403 does not claim the version is missing" \
+  "does not exist" "$out_403"
+assert_not_contains "404 does not blame the rate limit" \
+  "rate limit" "$out_404"
+
+# A request that never reached the server (DNS/proxy/TLS) reports 000, which is
+# a network problem, not a missing version.
+DL_000="${WORK}/dl000"
+mkdir -p "$DL_000"
+out_000="$(PATH="${STUB_BIN}:$PATH" STUB_FIXTURES="${WORK}/empty" STUB_STATUS=000 \
+  ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=0.43.0 \
+  ASDF_DOWNLOAD_PATH="$DL_000" "${REPO_ROOT}/bin/download" 2>&1)"
+assert_status "network failure fails closed" "1" "$?"
+assert_contains "000 says GitHub was unreachable" "could not reach" "$out_000"
+assert_not_contains "000 does not claim the version is missing" \
+  "does not exist" "$out_000"
+
+# Fail-closed must be total: no partial artifact may survive a failed fetch.
+assert_eq "404 leaves no partial download behind" "0" \
+  "$(find "$DL_404" -mindepth 1 | grep -c . || true)"
 
 ########################################################################
 section "bin/install handles a mismatched top-level dir (P0-2 regression)"
