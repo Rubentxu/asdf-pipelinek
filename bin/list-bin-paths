@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# asdf-pipelinek bin/list-bin: expose launcher path to shims; fail closed if absent.
+# asdf-pipelinek bin/list-bin-paths: expose the launcher dir to asdf shims.
+# Paths are relative to ASDF_INSTALL_PATH. Fail closed if the launcher is absent.
 set -euo pipefail
 
-VERSION="${ASDF_INSTALL_VERSION}"
-install_dir="${ASDF_INSTALL_PATH}"
+install_dir="${ASDF_INSTALL_PATH:-}"
+if [ -z "$install_dir" ]; then
+  echo "ERROR: ASDF_INSTALL_PATH is not set." >&2
+  exit 1
+fi
 
 if [ -x "${install_dir}/bin/pipelinek" ]; then
   echo "bin"
 else
+  echo "ERROR: no launcher at ${install_dir}/bin/pipelinek. Fail-closed abort." >&2
   exit 1
 fi

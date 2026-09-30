@@ -1,84 +1,57 @@
 #!/usr/bin/env bash
-# asdf-pipelinek bin/list-all: all installable versions, oldest-first, space-separated.
-# asdf 0.19 requires this callback for `asdf latest`.
+# asdf-pipelinek bin/list-all: all installable versions.
 #
-# Authentication: tries GITHUB_TOKEN env, then gh CLI, then gh config file.
-# If all fail, uses unauthenticated API (rate limit: 60 req/hour).
+# asdf 0.19 contract: ONE line, space separated, newest version last.
+#
+# Authentication: lib/common.bash resolves a token from GITHUB_TOKEN,
+# GITHUB_API_TOKEN, the gh CLI or the gh config file. GitHub allows only 60
+# anonymous requests per hour, which CI exhausts quickly. A failed
+# authenticated request is retried anonymously so a bad token cannot make the
+# plugin unusable.
 set -euo pipefail
 
-GH_REPO="Rubentxu/pipeline-kotlin"
-GH_API="https://api.github.com/repos/${GH_REPO}/releases"
+dir="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=../lib/common.bash
+source "${dir}/lib/common.bash"
 
-# Try to get GitHub token from multiple sources
-get_gh_token() {
-    # 1. Environment variable
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-        echo "$GITHUB_TOKEN"
-        return 0
-    fi
-    
-    # 2. gh CLI (if available and authenticated)
-    if command -v gh &>/dev/null; then
-        local token
-        token=$(gh auth token 2>/dev/null) && echo "$token" && return 0
-    fi
-    
-    # 3. Read from gh config file
-    local gh_config="${HOME}/.config/gh/hosts.yml"
-    if [ -f "$gh_config" ]; then
-        local token
-        token=$(grep "oauth_token:" "$gh_config" 2>/dev/null | head -1 | awk '{print $2}')
-        [ -n "$token" ] && echo "$token" && return 0
-    fi
-    
-    return 1
-}
+api="https://api.github.com/repos/${PK_GH_REPO}/releases?per_page=100"
 
-# Fetch versions with retry logic
-fetch_versions() {
-    local curl_cmd="curl -fsSL --retry 3 --fail"
-    
-    # Try with token first
-    if GH_TOKEN=$(get_gh_token); then
-        curl_cmd="$curl_cmd -H 'Authorization: token ${GH_TOKEN}'"
-    fi
-    
-    # shellcheck disable=SC2086
-    local response
-    response=$(eval $CURL_CMD "$GH_API?per_page=100" 2>&1) && {
-        echo "$response" | grep -o '"tag_name": *"[^"]*"' \
-            | sed 's/.*"\([^"]*\)"$/\1/' \
-            | sed 's/^v//' \
-            | sort -u
-        return 0
+fetch_tags() {
+  # $1 is "auth" to force the token path, "anon" to force anonymous.
+  local token="" json=""
+  if [ "$1" = "auth" ] && token="$(pk_github_token)"; then
+    json="$(curl -fsSL --retry 3 -H "Authorization: token ${token}" "$api" 2>/dev/null)" || return 1
+  else
+    json="$(curl -fsSL --retry 3 "$api" 2>/dev/null)" || return 1
+  fi
+  # Parse tag_name without assuming the JSON is pretty-printed, and without
+  # depending on a specific number of spaces after the colon.
+  printf '%s' "$json" | awk '
+    match($0, /"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"/) {
+      s = substr($0, RSTART, RLENGTH)
+      sub(/^"tag_name"[[:space:]]*:[[:space:]]*"/, "", s)
+      sub(/"$/, "", s)
+      sub(/^v/, "", s)
+      if (s != "") print s
     }
-    
-    # If authenticated failed (rate limit), try without token
-    if [ -n "${GH_TOKEN:-}" ]; then
-        curl_cmd="curl -fsSL --retry 3 --fail"
-        response=$(eval $CURL_CMD "$GH_API?per_page=100" 2>&1) && {
-            echo "$response" | grep -o '"tag_name": *"[^"]*"' \
-                | sed 's/.*"\([^"]*\)"$/\1/' \
-                | sed 's/^v//' \
-                | sort -u
-            return 0
-        }
-    fi
-    
-    return 1
+  ' | sort -u
 }
 
-# Main
-TAGS=$(fetch_versions) || {
-    echo "ERROR: could not list releases of ${GH_REPO}." >&2
-    echo "" >&2
-    echo "Troubleshooting:" >&2
-    echo "  1. Check your internet connection" >&2
-    echo "  2. GitHub API rate limit may be exceeded" >&2
-    echo "  3. To increase limits, authenticate with GitHub:" >&2
-    echo "     - Run: gh auth login" >&2
-    echo "     - Or set GITHUB_TOKEN environment variable" >&2
-    exit 1
-}
+tags="$(fetch_tags auth || fetch_tags anon || true)"
 
-echo "$TAGS" | tr '\n' ' '; echo
+if [ -z "$tags" ]; then
+  echo "ERROR: could not list releases of ${PK_GH_REPO}." >&2
+  echo "" >&2
+  echo "Troubleshooting:" >&2
+  echo "  1. Check your internet connection" >&2
+  echo "  2. GitHub API rate limit may be exceeded" >&2
+  echo "  3. To increase the limit, authenticate with GitHub:" >&2
+  echo "     - Run: gh auth login" >&2
+  echo "     - Or set GITHUB_TOKEN in your environment" >&2
+  exit 1
+fi
+
+# Ascending SemVer order, so the newest version is last and a stable release
+# is ordered after its own prereleases.
+printf '%s\n' "$tags" | pk_sort_versions | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//'
+printf '\n'
