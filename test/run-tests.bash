@@ -548,14 +548,20 @@ assert_eq "prefix query 0.39 returns latest stable 0.39.x" \
 # The callback must work end to end against the recorded release fixture.
 # An empty override dir means "no per-test overrides", so the committed
 # releases.json fixture is still used.
+#
+# PATH must carry the stub here. Without it this callback reached the real
+# GitHub API and returned whichever release is newest today, so the assertion
+# silently tested production instead of the fixture, and only failed because
+# upstream had moved on since the fixture was recorded. Every run that did NOT
+# fail was a run that proved nothing about the contract.
 export STUB_FIXTURES="$WORK/no-overrides"
 mkdir -p "$STUB_FIXTURES"
 assert_eq "latest-stable callback returns the newest stable" \
-  "0.43.0" "$("${REPO_ROOT}/bin/latest-stable" 2>/dev/null)"
+  "0.43.0" "$(PATH="${STUB_BIN}:$PATH" "${REPO_ROOT}/bin/latest-stable" 2>/dev/null)"
 assert_eq "latest-stable honours a prefix query" \
-  "0.40.0" "$("${REPO_ROOT}/bin/latest-stable" 0.40 2>/dev/null)"
+  "0.40.0" "$(PATH="${STUB_BIN}:$PATH" "${REPO_ROOT}/bin/latest-stable" 0.40 2>/dev/null)"
 assert_eq "latest-stable fails closed for an unknown query" "1" \
-  "$("${REPO_ROOT}/bin/latest-stable" 9.99 >/dev/null 2>&1; echo $?)"
+  "$(PATH="${STUB_BIN}:$PATH" "${REPO_ROOT}/bin/latest-stable" 9.99 >/dev/null 2>&1; echo $?)"
 
 ########################################################################
 section "bin/list-all output contract"
