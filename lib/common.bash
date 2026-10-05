@@ -11,8 +11,101 @@ PK_RELEASE_BASE="https://github.com/${PK_GH_REPO}/releases/download"
 # exactly "SHA256SUMS" (NOT "pipelinek-<version>.SHA256SUMS"). Keep this in one
 # place so a future upstream rename is a one-line change.
 pk_sums_asset() { printf '%s\n' "SHA256SUMS"; }
-pk_zip_asset() { printf 'pipelinek-%s.zip\n' "$1"; }
 pk_release_url() { printf '%s/v%s/%s\n' "$PK_RELEASE_BASE" "$1" "$2"; }
+
+# Which manifest entry is the distribution archive.
+#
+# The published manifest is "<sha256>  <name>", two spaces, no '*' marker, but
+# tolerate the binary-mode '*' prefix some checksum tools emit. The name is the
+# last whitespace-delimited field; everything before it is the digest.
+PK_DIST_ZIP_RE='^pipelinek-[^/]+\.zip$'
+
+# Print "<sha256><TAB><name>" for every distribution-archive entry in a manifest.
+# One awk owns the parsing so the consumers below cannot drift apart on what a
+# manifest line means.
+# $1 path to a SHA256SUMS file.
+pk_manifest_dist_rows() {
+  awk -v re="$PK_DIST_ZIP_RE" '
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      sub(/^[ \t]+/, "", line)
+      # strip an optional binary-mode marker
+      sub(/^[*]/, "", line)
+      n = split(line, f, /[ \t]+/)
+      if (n < 2) next
+      name = f[n]
+      sub(/^\*/, "", name)
+      if (name !~ re) next
+      print f[1] "\t" name
+    }
+  ' "$1"
+}
+
+# Print the name of the distribution archive in a manifest.
+# $1 path to a SHA256SUMS file.
+#
+# The name is READ from what the release published, never derived from the
+# version. Deriving it ("pipelinek-<version>.zip") is what made this plugin
+# unable to install any real release candidate: the v0.47.0 line ships rc2's
+# artifact as "pipelinek-0.47.0.zip" under the tag "v0.47.0-rc2", so the derived
+# name never existed and rc2 was uninstallable by every approved channel. A
+# promoted GA keeps the candidate's bytes, and under the v2 release model also
+# its asset name, so a name derived from the GA tag is a name nobody published.
+# Both directions were unwinnable: the correct name installs a URL that 404s,
+# and the only name that "worked" was the accident of a candidate published
+# under its GA name.
+#
+# SHA256SUMS is the release's own index of its contents, so the single entry
+# shaped like a distribution archive is the answer. The pattern only classifies
+# an entry by role (distribution vs sbom vs json); it does not rebuild a name.
+#
+# Fails closed (non-zero, diagnostic on stderr) when the manifest lists no such
+# entry or more than one. Choosing between candidates is the very guess this
+# replaces, and an unresolvable release must install nothing at all.
+pk_distribution_zip() {
+  local rows names count
+  rows="$(pk_manifest_dist_rows "$1")"
+  names="$(printf '%s' "$rows" | awk -F'\t' '!seen[$2]++ { print $2 }')"
+  count="$(printf '%s\n' "$names" | grep -c . || true)"
+  if [ "$count" -eq 0 ]; then
+    echo "no distribution archive (an entry named pipelinek-<something>.zip) is listed in the manifest" >&2
+    return 1
+  fi
+  if [ "$count" -gt 1 ]; then
+    echo "ambiguous distribution archive: the manifest lists ${count} of them" >&2
+    # shellcheck disable=SC2086  # deliberate: one name per line, unquoted so each becomes an argument
+    printf '  %s\n' $names >&2
+    return 1
+  fi
+  printf '%s\n' "$names"
+}
+
+# Print the SHA-256 the manifest publishes for a named entry.
+# $1 manifest path, $2 asset name.
+#
+# Fails closed when the asset has no entry, and also when the manifest gives
+# the same name two different digests: picking either would make the
+# verification below meaningless, since it would only prove the file matches
+# one of two contradictory claims.
+pk_manifest_digest() {
+  local digests count
+  digests="$(pk_manifest_dist_rows "$1" | awk -F'\t' -v want="$2" '$2 == want { print $1 }')"
+  count="$(printf '%s\n' "$digests" | grep -c . || true)"
+  if [ "$count" -eq 0 ]; then
+    echo "the manifest has no entry for ${2}" >&2
+    return 1
+  fi
+  if [ "$count" -gt 1 ]; then
+    local unique
+    unique="$(printf '%s\n' "$digests" | awk '!seen[$0]++' | grep -c . || true)"
+    if [ "$unique" -gt 1 ]; then
+      echo "the manifest gives ${2} ${unique} different digests" >&2
+      return 1
+    fi
+  fi
+  printf '%s\n' "$digests" | head -1
+}
 
 # GitHub token resolution, shared by every callback that talks to GitHub.
 # Precedence: GITHUB_TOKEN, GITHUB_API_TOKEN, gh CLI, gh config file.

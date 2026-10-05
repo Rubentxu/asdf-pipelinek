@@ -213,17 +213,115 @@ assert_eq "sorting equal versions terminates" \
   "$(printf '%s\n' 0.43.0 0.43.0 | pk_sort_versions | tr '\n' ' ' | sed 's/ $//')"
 
 ########################################################################
-section "asset naming matches upstream reality"
+section "the archive name is READ from the manifest, not derived from the tag"
 
 # The real v0.43.0 release publishes an asset named exactly "SHA256SUMS".
 assert_eq "digest manifest asset name" "SHA256SUMS" "$(pk_sums_asset)"
-assert_eq "zip asset name" "pipelinek-0.43.0.zip" "$(pk_zip_asset 0.43.0)"
 assert_eq "release URL shape" \
   "https://github.com/Rubentxu/pipeline-kotlin/releases/download/v0.43.0/SHA256SUMS" \
   "$(pk_release_url 0.43.0 SHA256SUMS)"
 
+# A manifest writer, so each test states its fixture as data and not as shell.
+write_manifest() { cat > "$1"; }
+
+M="${WORK}/m1"
+
+# THE regression. v0.47.0-rc2 publishes its archive as "pipelinek-0.47.0.zip"
+# under the tag "v0.47.0-rc2", alongside an sbom and two json manifests. A plugin
+# that built the name from the tag asked for "pipelinek-0.47.0-rc2.zip", which
+# no release has ever published, so no release candidate of this project could
+# be installed. Reading the name out of the manifest resolves it.
+write_manifest "$M" <<'SUMS'
+02b1632edcd351bce3ee49ab735b72df21941595036ef5edcb7dbb3d4e9dd635  pipelinek-0.47.0.zip
+f6d158afb015e8016bd21b2534a8526ac38181e8512a75f19e5038302787b2dc  pipelinek-0.47.0.sbom.json
+e491f02e99a495bba412173c3c1c717e099d44160b4e7957c6192654f8113579  distribution-manifest.json
+e6583293b43f1c30de98789e6f7d4e539cc9970b2e4ea35fbb77cfd6982ba7a4  candidate-handoff.json
+SUMS
+assert_eq "resolves the rc2 archive, whose name differs from its tag" \
+  "pipelinek-0.47.0.zip" "$(pk_distribution_zip "$M")"
+assert_eq "digest comes from the same manifest" \
+  "02b1632edcd351bce3ee49ab735b72df21941595036ef5edcb7dbb3d4e9dd635" \
+  "$(pk_manifest_digest "$M" pipelinek-0.47.0.zip)"
+# The sbom shares the version prefix, so classification cannot be a bare
+# "starts with pipelinek-" test.
+assert_not_contains "the sbom is not mistaken for the archive" \
+  "sbom" "$(pk_distribution_zip "$M")"
+
+# v0.47.0-rc1 did carry a tag-shaped name, and must still resolve.
+write_manifest "$M" <<'SUMS'
+3bbe586b1fa2e6574fd11c1dd79292d51c330e92e7da87bf4f4c47071bbc0d7c  pipelinek-0.47.0-rc1.zip
+85020ea692fe92161b803acd4f840184fc19a11ffdf74326ad89b0f4d446b146  pipelinek-0.47.0-rc1.sbom.json
+SUMS
+assert_eq "resolves an rc1 archive named after its tag" \
+  "pipelinek-0.47.0-rc1.zip" "$(pk_distribution_zip "$M")"
+
+# A promoted GA carries the candidate's asset name verbatim under the GA tag, so
+# the GA-shaped manifest has to resolve to the same bytes the candidate shipped.
+write_manifest "$M" <<'SUMS'
+02b1632edcd351bce3ee49ab735b72df21941595036ef5edcb7dbb3d4e9dd635  pipelinek-0.47.0.zip
+02b1632edcd351bce3ee49ab735b72df21941595036ef5edcb7dbb3d4e9dd635  pipelinek-0.47.0.sbom.json
+SUMS
+assert_eq "resolves the GA archive" "pipelinek-0.47.0.zip" "$(pk_distribution_zip "$M")"
+
+# The older plain shape, unchanged.
+write_manifest "$M" <<'SUMS'
+59478baf669407aa905239e3754aff48d77d20f8fad4de8e48464583fb929397  pipelinek-0.46.0.zip
+5591480be83676a1172a3b714f52926b92a54ef133998a7652f9ce1f1e66ddd2  pipelinek-0.46.0.sbom.json
+SUMS
+assert_eq "resolves a plain GA archive" "pipelinek-0.46.0.zip" "$(pk_distribution_zip "$M")"
+
+# Unresolvable manifests must fail closed rather than fall back to a guess.
+write_manifest "$M" <<'SUMS'
+deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef  manifest.json
+SUMS
+out="$(pk_distribution_zip "$M" 2>&1)"
+assert_status "a manifest with no archive fails closed" "1" "$?"
+assert_contains "and says so" "no distribution archive" "$out"
+
+write_manifest "$M" <<'SUMS'
+aaaa  pipelinek-0.47.0.zip
+bbbb  pipelinek-0.47.0-hotfix.zip
+SUMS
+out="$(pk_distribution_zip "$M" 2>&1)"
+assert_status "two candidate archives fail closed" "1" "$?"
+assert_contains "ambiguity is named as such" "ambiguous" "$out"
+
+# One name with two digests is a self-contradicting manifest. Accepting either
+# digest would reduce the SHA-256 check to proving the file matches one of two
+# conflicting claims.
+write_manifest "$M" <<'SUMS'
+aaaa  pipelinek-0.47.0.zip
+bbbb  pipelinek-0.47.0.zip
+SUMS
+out="$(pk_manifest_digest "$M" pipelinek-0.47.0.zip 2>&1)"
+assert_status "conflicting digests fail closed" "1" "$?"
+assert_contains "and report the contradiction" "different digests" "$out"
+
+# The same name repeated with the same digest is benign.
+write_manifest "$M" <<'SUMS'
+aaaa  pipelinek-0.47.0.zip
+aaaa  pipelinek-0.47.0.zip
+SUMS
+assert_eq "a repeated identical entry still resolves" "aaaa" \
+  "$(pk_manifest_digest "$M" pipelinek-0.47.0.zip 2>/dev/null)"
+
+out="$(pk_manifest_digest "$M" pipelinek-9.9.9.zip 2>&1)"
+assert_status "an unknown asset has no digest" "1" "$?"
+
+# Manifest shapes seen in the wild: CRLF line endings, the binary-mode '*'
+# marker, single-tab separation, and leading indentation.
+write_manifest "$M" <<'SUMS'
+  cccc	pipelinek-0.47.0.zip
+SUMS
+assert_eq "leading blanks and tab separation parse" "pipelinek-0.47.0.zip" \
+  "$(pk_distribution_zip "$M")"
+
+printf 'dddd *pipelinek-0.47.0.zip\r\n' > "$M"
+assert_eq "binary-mode marker and CRLF parse" "dddd" \
+  "$(pk_manifest_digest "$M" pipelinek-0.47.0.zip 2>/dev/null)"
+
 ########################################################################
-section "bin/download uses the real asset names (P0-1 regression)"
+section "bin/download resolves the archive from the release (P0-1 regression)"
 
 STUB_BIN="${WORK}/stubbin"
 make_curl_stub "$STUB_BIN"
@@ -260,19 +358,62 @@ out="$(PATH="${STUB_BIN}:$PATH" ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=0
 assert_status "download fails closed on digest mismatch" "1" "$?"
 assert_contains "download explains the mismatch" "verification FAILED" "$out"
 
-# A manifest with no entry for our artifact must also fail closed.
+# A manifest that lists no distribution archive at all must also fail closed.
 printf 'deadbeef  some-other-file.zip\n' > "${SUMS}/SHA256SUMS"
 out="$(PATH="${STUB_BIN}:$PATH" ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=0.43.0 \
   ASDF_DOWNLOAD_PATH="$DL_BAD" "${REPO_ROOT}/bin/download" 2>&1)"
-assert_status "download fails closed when manifest lacks the entry" "1" "$?"
-assert_contains "download explains the missing entry" "does not contain an entry" "$out"
+assert_status "download fails closed when the manifest lists no archive" "1" "$?"
+assert_contains "download explains the unresolvable manifest" \
+  "does not identify a distribution archive" "$out"
 
 # A manifest naming the artifact with a binary-mode '*' marker must still verify.
 printf '%s *pipelinek-0.43.0.zip\n' "$real_digest" > "${SUMS}/SHA256SUMS"
-printf '%s  pipelinek-0.43.0.zip\n' "$real_digest" > "${SUMS}/SHA256SUMS.good"
 out="$(PATH="${STUB_BIN}:$PATH" ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=0.43.0 \
   ASDF_DOWNLOAD_PATH="$DL_BAD" "${REPO_ROOT}/bin/download" 2>&1)"
 assert_status "sha256sum binary-mode manifest is tolerated" "0" "$?"
+
+# THE regression, end to end. Version 0.47.0-rc2 whose archive is published as
+# "pipelinek-0.47.0.zip". Before this change the plugin requested
+# "pipelinek-0.47.0-rc2.zip", which 404s, and no release candidate of this
+# project could be installed by asdf or mise.
+RC_DL="${WORK}/dlrc"
+RC_SUMS="${WORK}/sumsrc"
+mkdir -p "$RC_DL" "$RC_SUMS"
+make_release_zip "${RC_SUMS}/pipelinek-0.47.0.zip" "pipelinek-0.47.0"
+rc_digest="$(sha256sum "${RC_SUMS}/pipelinek-0.47.0.zip" | awk '{print $1}')"
+cat > "${RC_SUMS}/SHA256SUMS" <<SUMSRC
+${rc_digest}  pipelinek-0.47.0.zip
+${rc_digest}  pipelinek-0.47.0.sbom.json
+SUMSRC
+
+out="$(PATH="${STUB_BIN}:$PATH" STUB_FIXTURES="$RC_SUMS" ASDF_INSTALL_TYPE=version \
+  ASDF_INSTALL_VERSION=0.47.0-rc2 ASDF_DOWNLOAD_PATH="$RC_DL" \
+  "${REPO_ROOT}/bin/download" 2>&1)"
+assert_status "an rc whose archive is named after the GA installs" "0" "$?"
+assert_contains "it asks for the name the release published" \
+  "download/v0.47.0-rc2/pipelinek-0.47.0.zip" "$out"
+assert_contains "and verifies it" "SHA-256 verified" "$out"
+if [ -f "${RC_DL}/pipelinek-0.47.0.zip" ]; then
+  ok "the archive lands under its published name"
+else
+  fail "the archive lands under its published name" \
+    "download dir: $(find "$RC_DL" -mindepth 1 | tr '\n' ' ')"
+fi
+
+RC_INSTALL="${WORK}/installrc"
+out="$(ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=0.47.0-rc2 \
+  ASDF_DOWNLOAD_PATH="$RC_DL" ASDF_INSTALL_PATH="$RC_INSTALL" \
+  "${REPO_ROOT}/bin/install" 2>&1)"
+assert_status "and installs from it" "0" "$?"
+if [ -x "${RC_INSTALL}/bin/pipelinek" ]; then
+  ok "an rc installs a working launcher"
+else
+  fail "an rc installs a working launcher" \
+    "tree: $(find "$RC_INSTALL" -maxdepth 2 | tr '\n' ' ')"
+fi
+
+# Restore the fixture the remaining sections rely on.
+printf '%s  pipelinek-0.43.0.zip\n' "$real_digest" > "${SUMS}/SHA256SUMS"
 
 ########################################################################
 section "download distinguishes WHY a fetch failed"
@@ -364,6 +505,21 @@ out="$(ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=0.43.0 \
   ASDF_DOWNLOAD_PATH="${WORK}/empty" ASDF_INSTALL_PATH="${WORK}/install-empty" \
   "${REPO_ROOT}/bin/install" 2>&1)"
 assert_status "install fails closed without a verified download" "1" "$?"
+assert_contains "install says what it looked for" "no pipelinek-*.zip" "$out"
+
+# Two archives in the download directory means resolution cannot be trusted, and
+# installing either would be a coin flip on which release this is.
+AMB="${WORK}/dlamb"
+mkdir -p "$AMB"
+cp "${DL}/pipelinek-0.43.0.zip" "${AMB}/"
+cp "${DL}/pipelinek-0.43.0.zip" "${AMB}/pipelinek-0.43.0-other.zip"
+out="$(ASDF_INSTALL_TYPE=version ASDF_INSTALL_VERSION=0.43.0 \
+  ASDF_DOWNLOAD_PATH="$AMB" ASDF_INSTALL_PATH="${WORK}/install-amb" \
+  "${REPO_ROOT}/bin/install" 2>&1)"
+assert_status "install fails closed on two archives" "1" "$?"
+assert_contains "and refuses to guess" "Refusing to guess" "$out"
+assert_eq "nothing was installed" "0" \
+  "$(find "${WORK}/install-amb" -mindepth 1 2>/dev/null | grep -c . || true)"
 
 ########################################################################
 section "latest-stable callback honours the asdf contract (P0-3 regression)"
