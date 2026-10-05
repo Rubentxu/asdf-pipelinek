@@ -16,19 +16,44 @@ dir="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=../lib/common.bash
 source "${dir}/lib/common.bash"
 
-zip_name="$(pk_zip_asset "$VERSION")"
+zip_name=""
+# Locate the archive bin/download actually verified. The name is discovered, not
+# recomputed from the version: a release candidate and the GA promoted from it
+# do not necessarily carry an asset named after the tag they hang from, so any
+# reconstruction here would fail on exactly the versions that matter.
+#
+# A missing download directory is "no archives", not an error to propagate:
+# find exits non-zero on it, and under set -e that would abort before the
+# fail-closed message below could explain what was missing.
+zips=""
+if [ -d "$download_dir" ]; then
+  zips="$(find "$download_dir" -maxdepth 1 -type f -name 'pipelinek-*.zip' 2>/dev/null || true)"
+fi
+zip_count="$(printf '%s\n' "$zips" | grep -c . || true)"
 
 # Fail-closed: refuse to install unless bin/download already fetched the ZIP.
-if [ ! -f "${download_dir}/${zip_name}" ]; then
-  echo "ERROR: ${zip_name} not found in ${download_dir}. Run bin/download first." >&2
+if [ "$zip_count" -eq 0 ]; then
+  echo "ERROR: no pipelinek-*.zip found in ${download_dir}. Run bin/download first." >&2
   exit 1
 fi
+if [ "$zip_count" -gt 1 ]; then
+  # Two archives in one download directory means the resolution cannot be
+  # trusted to have picked one; installing either would be a guess.
+  echo "ERROR: ${download_dir} holds ${zip_count} distribution archives." >&2
+  echo "Refusing to guess which one to install. Fail-closed abort." >&2
+  # shellcheck disable=SC2086  # deliberate: one path per line, unquoted so each becomes an argument
+  printf '  %s\n' $zips >&2
+  exit 1
+fi
+
+zip_path="$zips"
+zip_name="${zip_path##*/}"
 
 # Never mutate another version: start from a clean install path.
 rm -rf "$install_dir"
 mkdir -p "$install_dir"
 
-unzip -q "${download_dir}/${zip_name}" -d "$install_dir"
+unzip -q "$zip_path" -d "$install_dir"
 
 # The release ZIP wraps everything in a single top-level directory whose name is
 # NOT guaranteed to relate to the version: the published v0.43.0 artifact
