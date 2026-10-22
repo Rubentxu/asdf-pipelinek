@@ -593,6 +593,26 @@ assert_not_contains "no prerelease leaks as newest" "-rc" "$newest"
 assert_eq "last token is the newest stable release" "0.43.0" \
   "$(printf '%s' "$out" | tr ' ' '\n' | grep -v '^$' | tail -1)"
 
+FALLBACK_FIXTURES="${WORK}/empty-release-list"
+mkdir -p "$FALLBACK_FIXTURES"
+printf '[]\n' > "${FALLBACK_FIXTURES}/releases.json"
+cat > "${FALLBACK_FIXTURES}/tags.json" <<'TAGS'
+[
+  {"ref": "refs/tags/v0.74.0-rc1"},
+  {"ref": "refs/tags/v0.75.0"},
+  {"ref": "refs/tags/wu-lpr-090"},
+  {"ref": "refs/tags/checkpoint-2026-10-22"}
+]
+TAGS
+fallback_versions="$(PATH="${STUB_BIN}:$PATH" STUB_FIXTURES="$FALLBACK_FIXTURES" \
+  "${REPO_ROOT}/bin/list-all" 2>/dev/null)"
+assert_status "empty release list falls back to Git tag refs" "0" "$?"
+assert_eq "fallback returns only SemVer tags" "0.74.0-rc1 0.75.0" \
+  "$(printf '%s' "$fallback_versions" | tr ' ' '\n' | pk_sort_versions | tr '\n' ' ' | sed 's/ $//')"
+latest_fallback="$(PATH="${STUB_BIN}:$PATH" STUB_FIXTURES="$FALLBACK_FIXTURES" \
+  "${REPO_ROOT}/bin/latest-stable" 2>/dev/null)"
+assert_eq "latest-stable resolves the stable version from tag refs" "0.75.0" "$latest_fallback"
+
 ########################################################################
 printf '\n'
 if [ "$FAIL" -eq 0 ]; then
