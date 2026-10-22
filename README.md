@@ -57,6 +57,25 @@ you actually have instead of a generic "could not download":
 Every one of these still aborts without installing anything.
 
 
+## How the artifact is found
+
+The plugin does **not** build the asset name from the version. It reads it out
+of the `SHA256SUMS` manifest the release publishes: the single entry shaped like
+a distribution archive (`pipelinek-<something>.zip`) is the artifact, and its
+name is whatever the release actually used.
+
+This matters because a release tag and its asset name are independent. The
+`v0.47.0` line publishes `v0.47.0-rc1`'s archive as
+`pipelinek-0.47.0-rc1.zip` but `v0.47.0-rc2`'s as `pipelinek-0.47.0.zip`, and a
+GA promoted from a candidate keeps the candidate's asset name. A plugin that
+derived the name from the tag could install neither: it would request a file no
+release has ever published. Reading the name fixes release candidates and
+promoted GA releases at the same time, without either renaming assets.
+
+If the manifest lists no such entry, or more than one, the install aborts
+without installing anything. Guessing between candidates is exactly the failure
+this replaces.
+
 ## Version policy
 
 - `asdf install pipelinek <version>` accepts any published release tag,

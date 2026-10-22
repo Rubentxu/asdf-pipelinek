@@ -16,9 +16,7 @@ source "${dir}/lib/common.bash"
 download_dir="${ASDF_DOWNLOAD_PATH:-$(mktemp -d)}"
 mkdir -p "$download_dir"
 
-zip_name="$(pk_zip_asset "$VERSION")"
 sums_name="$(pk_sums_asset)"
-zip_url="$(pk_release_url "$VERSION" "$zip_name")"
 sums_url="$(pk_release_url "$VERSION" "$sums_name")"
 tag_url="https://github.com/${PK_GH_REPO}/releases/tag/v${VERSION}"
 
@@ -27,6 +25,29 @@ fetch() {
   # just falls back to anonymous access, which still works but is rate limited.
   pk_fetch "$1" "$2"
 }
+
+# The manifest is fetched FIRST because it is both the digest authority and the
+# index of what this release contains. The artifact's name is read out of it,
+# so it has to be in hand before anything can be downloaded. That ordering is
+# also why the artifact URL is never reconstructed from the version: see
+# pk_distribution_zip for why deriving it cannot work for a release candidate.
+echo "Downloading ${sums_url}"
+if ! fetch "$sums_url" "${download_dir}/${sums_name}"; then
+  pk_explain_fetch_failure "$sums_name" "$VERSION"
+  echo "This release is unusable without its digest manifest. Fail-closed abort." >&2
+  echo "  ${tag_url}" >&2
+  exit 1
+fi
+
+sums_path="${download_dir}/${sums_name}"
+
+if ! zip_name="$(pk_distribution_zip "$sums_path")"; then
+  echo "ERROR: ${sums_name} does not identify a distribution archive. Fail-closed abort." >&2
+  echo "  ${tag_url}" >&2
+  exit 1
+fi
+
+zip_url="$(pk_release_url "$VERSION" "$zip_name")"
 
 echo "Downloading ${zip_url}"
 if ! fetch "$zip_url" "${download_dir}/${zip_name}"; then
@@ -37,32 +58,8 @@ if ! fetch "$zip_url" "${download_dir}/${zip_name}"; then
   exit 1
 fi
 
-echo "Downloading ${sums_url}"
-if ! fetch "$sums_url" "${download_dir}/${sums_name}"; then
-  pk_explain_fetch_failure "$sums_name" "$VERSION"
-  echo "This release is unusable without its digest manifest. Fail-closed abort." >&2
-  exit 1
-fi
-
-# The published manifest is "<sha256>  <name>", two spaces, no '*' marker.
-# Match the artifact by name rather than trusting line order, and tolerate the
-# binary-mode '*' prefix that some checksum tools emit.
-expected="$(awk -v want="$zip_name" '
-  {
-    line = $0
-    sub(/\r$/, "", line)
-    # strip an optional binary-mode marker
-    sub(/^[*]/, "", line)
-    # the name is the last whitespace-delimited field
-    n = split(line, f, /[ \t]+/)
-    name = f[n]
-    sub(/^\*/, "", name)
-    if (name == want) { print f[1]; exit }
-  }
-' "${download_dir}/${sums_name}")"
-
-if [ -z "$expected" ]; then
-  echo "ERROR: ${sums_name} does not contain an entry for ${zip_name}. Fail-closed abort." >&2
+if ! expected="$(pk_manifest_digest "$sums_path" "$zip_name")"; then
+  echo "ERROR: ${zip_name} is listed ambiguously in ${sums_name}. Fail-closed abort." >&2
   exit 1
 fi
 
