@@ -247,6 +247,17 @@ assert_eq "digest comes from the same manifest" \
 assert_not_contains "the sbom is not mistaken for the archive" \
   "sbom" "$(pk_distribution_zip "$M")"
 
+# A release with both runtime and SDK ZIPs must select only the runtime ZIP.
+write_manifest "$M" <<'SUMS'
+02b1632edcd351bce3ee49ab735b72df21941595036ef5edcb7dbb3d4e9dd635  pipelinek-0.47.0.zip
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  pipelinek-0.47.0.sdk.zip
+SUMS
+assert_eq "runtime archive wins when release also has an SDK ZIP" \
+  "pipelinek-0.47.0.zip" "$(pk_distribution_zip "$M")"
+assert_eq "only the runtime ZIP is returned as a candidate" \
+  "$(printf '02b1632edcd351bce3ee49ab735b72df21941595036ef5edcb7dbb3d4e9dd635\tpipelinek-0.47.0.zip')" \
+  "$(pk_manifest_dist_rows "$M")"
+
 # v0.47.0-rc1 did carry a tag-shaped name, and must still resolve.
 write_manifest "$M" <<'SUMS'
 3bbe586b1fa2e6574fd11c1dd79292d51c330e92e7da87bf4f4c47071bbc0d7c  pipelinek-0.47.0-rc1.zip

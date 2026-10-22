@@ -13,7 +13,9 @@ PK_RELEASE_BASE="https://github.com/${PK_GH_REPO}/releases/download"
 pk_sums_asset() { printf '%s\n' "SHA256SUMS"; }
 pk_release_url() { printf '%s/v%s/%s\n' "$PK_RELEASE_BASE" "$1" "$2"; }
 
-# Which manifest entry is the distribution archive.
+# Which manifest entry is the runtime distribution archive. SDK ZIPs are
+# separate optional assets (for example pipelinek-0.75.0.sdk.zip) and must not
+# make a release appear to contain multiple runtime archives.
 #
 # The published manifest is "<sha256>  <name>", two spaces, no '*' marker, but
 # tolerate the binary-mode '*' prefix some checksum tools emit. The name is the
@@ -36,7 +38,8 @@ pk_manifest_dist_rows() {
       if (n < 2) next
       name = f[n]
       sub(/^\*/, "", name)
-      if (name !~ re) next
+      # SDK bundles are not runtime distributions.
+      if (name !~ re || name ~ /\.sdk\.zip$/) next
       print f[1] "\t" name
     }
   ' "$1"
@@ -57,8 +60,9 @@ pk_manifest_dist_rows() {
 # under its GA name.
 #
 # SHA256SUMS is the release's own index of its contents, so the single entry
-# shaped like a distribution archive is the answer. The pattern only classifies
-# an entry by role (distribution vs sbom vs json); it does not rebuild a name.
+# shaped like a runtime distribution archive is the answer. SDK ZIPs, SBOMs,
+# and JSON metadata are different asset roles. This classifies entries without
+# rebuilding a name.
 #
 # Fails closed (non-zero, diagnostic on stderr) when the manifest lists no such
 # entry or more than one. Choosing between candidates is the very guess this
