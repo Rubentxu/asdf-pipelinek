@@ -37,7 +37,34 @@ fetch_tags() {
   ' | sort -u
 }
 
+fetch_tag_refs() {
+  # Some GitHub API paths may return an empty release collection even though
+  # published tag-specific release lookups work. Fall back to the canonical
+  # Git refs endpoint, then keep only SemVer-shaped tags so work-unit and
+  # checkpoint tags can never become installable versions.
+  local token="" json=""
+  local refs_api="https://api.github.com/repos/${PK_GH_REPO}/git/matching-refs/tags?per_page=100"
+  if [ "$1" = "auth" ] && token="$(pk_github_token)"; then
+    json="$(curl -fsSL --retry 3 -H "Authorization: token ${token}" "$refs_api" 2>/dev/null)" || return 1
+  else
+    json="$(curl -fsSL --retry 3 "$refs_api" 2>/dev/null)" || return 1
+  fi
+  printf '%s' "$json" | awk '
+    match($0, /"ref"[[:space:]]*:[[:space:]]*"refs\/tags\/[^\"]+"/) {
+      s = substr($0, RSTART, RLENGTH)
+      sub(/^"ref"[[:space:]]*:[[:space:]]*"refs\/tags\//, "", s)
+      sub(/"$/, "", s)
+      sub(/^v/, "", s)
+      if (s ~ /^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$/) print s
+    }
+  ' | sort -u
+}
+
 tags="$(fetch_tags auth || fetch_tags anon || true)"
+
+if [ -z "$tags" ]; then
+  tags="$(fetch_tag_refs auth || fetch_tag_refs anon || true)"
+fi
 
 if [ -z "$tags" ]; then
   echo "ERROR: could not list releases of ${PK_GH_REPO}." >&2
